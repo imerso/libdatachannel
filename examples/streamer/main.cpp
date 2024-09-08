@@ -15,6 +15,7 @@
 
 #include "nlohmann/json.hpp"
 
+#include "h264camera.hpp"
 #include "h264fileparser.hpp"
 #include "opusfileparser.hpp"
 #include "helpers.hpp"
@@ -45,7 +46,8 @@ shared_ptr<Client> createPeerConnection(const Configuration &config,
 /// @param fps Video FPS
 /// @param opusSamples Directory with opus samples
 /// @returns Stream object
-shared_ptr<Stream> createStream(const string h264Samples, const unsigned fps, const string opusSamples);
+shared_ptr<Stream> createVideoFileStream(const string h264Samples, const unsigned fps, const string opusSamples);
+shared_ptr<Stream> createCameraStream(const string device, int width, int height, int fps, int bitrate, const string opusSamples);
 
 /// Add client to stream
 /// @param client Client
@@ -321,8 +323,89 @@ shared_ptr<Client> createPeerConnection(const Configuration &config,
     return client;
 };
 
+shared_ptr<Stream> createCameraStream(const string device, int width, int height, int fps, int bitrate, const string opusSamples)
+{
+    auto video = make_shared<H264Camera>(device);
+    auto audio = make_shared<OPUSFileParser>(opusSamples, true);
+
+    auto stream = make_shared<Stream>(video, audio);
+    // set callback responsible for sample sending
+    stream->onSample([ws = make_weak_ptr(stream)](Stream::StreamSourceType type, uint64_t sampleTime, rtc::binary sample) {
+        vector<ClientTrack> tracks{};
+        string streamType = type == Stream::StreamSourceType::Video ? "video" : "audio";
+        // get track for given type
+        function<optional<shared_ptr<ClientTrackData>> (shared_ptr<Client>)> getTrackData = [type](shared_ptr<Client> client) {
+            return type == Stream::StreamSourceType::Video ? client->video : client->audio;
+        };
+        // get all clients with Ready state
+        for(auto id_client: clients) {
+            auto id = id_client.first;
+            auto client = id_client.second;
+            auto optTrackData = getTrackData(client);
+            if (client->getState() == Client::State::Ready && optTrackData.has_value()) {
+                auto trackData = optTrackData.value();
+                tracks.push_back(ClientTrack(id, trackData));
+            }
+        }
+        if (!tracks.empty()) {
+            for (auto clientTrack: tracks) {
+                auto client = clientTrack.id;
+                auto trackData = clientTrack.trackData;
+                auto rtpConfig = trackData->sender->rtpConfig;
+
+                // sample time is in us, we need to convert it to seconds
+                auto elapsedSeconds = double(sampleTime) / (1000 * 1000);
+                // get elapsed time in clock rate
+                uint32_t elapsedTimestamp = rtpConfig->secondsToTimestamp(elapsedSeconds);
+                // set new timestamp
+                rtpConfig->timestamp = rtpConfig->startTimestamp + elapsedTimestamp;
+
+                // get elapsed time in clock rate from last RTCP sender report
+                auto reportElapsedTimestamp = rtpConfig->timestamp - trackData->sender->lastReportedTimestamp();
+                // check if last report was at least 1 second ago
+                if (rtpConfig->timestampToSeconds(reportElapsedTimestamp) > 1) {
+                    trackData->sender->setNeedsToReport();
+                }
+
+/*
+                if (sample.size() == 0) return;
+
+                static int frame = 0;
+                if (sample.size() >= 32)
+                {
+                    for (int i=0; i<32; i++)
+                    {
+                        printf("%02X ", (unsigned int)sample[i]);
+                    }
+                    printf("\n");
+                    frame++;
+                }
+
+                cout << "Sending " << streamType << " sample with size: " << to_string(sample.size()) << " to " << client << endl;
+*/
+
+                try {
+                    // send sample
+                    trackData->track->send(sample);
+                } catch (const std::exception &e) {
+                    cerr << "Unable to send "<< streamType << " packet: " << e.what() << endl;
+                }
+            }
+        }
+        MainThread.dispatch([ws]() {
+            if (clients.empty()) {
+                // we have no clients, stop the stream
+                if (auto stream = ws.lock()) {
+                    stream->stop();
+                }
+            }
+        });
+    });
+    return stream;
+}
+
 /// Create stream
-shared_ptr<Stream> createStream(const string h264Samples, const unsigned fps, const string opusSamples) {
+shared_ptr<Stream> createVideoFileStream(const string h264Samples, const unsigned fps, const string opusSamples) {
     // video source
     auto video = make_shared<H264FileParser>(h264Samples, fps, true);
     // audio source
@@ -367,7 +450,23 @@ shared_ptr<Stream> createStream(const string h264Samples, const unsigned fps, co
                     trackData->sender->setNeedsToReport();
                 }
 
+/*
+                if (sample.size() == 0) return;
+
+                static int frame = 0;
+                if (sample.size() >= 32)
+                {
+                    for (int i=0; i<32; i++)
+                    {
+                        printf("%02X ", (unsigned int)sample[i]);
+                    }
+                    printf("\n");
+                    frame++;
+                }
+
                 cout << "Sending " << streamType << " sample with size: " << to_string(sample.size()) << " to " << client << endl;
+*/
+
                 try {
                     // send sample
                     trackData->track->send(sample);
@@ -398,7 +497,8 @@ void startStream() {
             return;
         }
     } else {
-        stream = createStream(h264SamplesDirectory, 30, opusSamplesDirectory);
+//        stream = createVideoFileStream(h264SamplesDirectory, 30, opusSamplesDirectory);
+        stream = createCameraStream("/dev/video2", 1280, 720, 30, 1500000, opusSamplesDirectory);
         avStream = stream;
     }
     stream->start();
@@ -420,14 +520,19 @@ void sendInitialNalus(shared_ptr<Stream> stream, shared_ptr<ClientTrackData> vid
         video->sender->rtpConfig->timestamp += frameTimestampDuration;
         // Send initial NAL units again to start stream in firefox browser
         video->track->send(initialNalus);
+        cout << "Initial nalus sent" << endl;
     }
+    else
+        cout << "No initial nalus to send!" << endl;
 }
 
 /// Add client to stream
 /// @param client Client
 /// @param adding_video True if adding video
 void addToStream(shared_ptr<Client> client, bool isAddingVideo) {
+    cout << "Add " << (isAddingVideo ? "VIDEO" : "AUDIO") << endl;
     if (client->getState() == Client::State::Waiting) {
+        cout << "state from waiting to " << (isAddingVideo ? "waitingforaudio" : "waitingforvideo") << endl;
         client->setState(isAddingVideo ? Client::State::WaitingForAudio : Client::State::WaitingForVideo);
     } else if ((client->getState() == Client::State::WaitingForAudio && !isAddingVideo)
                || (client->getState() == Client::State::WaitingForVideo && isAddingVideo)) {
@@ -437,10 +542,12 @@ void addToStream(shared_ptr<Client> client, bool isAddingVideo) {
         auto video = client->video.value();
 
         if (avStream.has_value()) {
+            cout << "Sending initial nalus" << endl;
             sendInitialNalus(avStream.value(), video);
         }
 
         client->setState(Client::State::Ready);
+        cout << "STATE READY" << endl;
     }
     if (client->getState() == Client::State::Ready) {
         startStream();

@@ -16,37 +16,55 @@ H264Camera::~H264Camera()
 
 }
 
-void H264Camera::start(int width, int height, int fps, int bitrate)
+void H264Camera::start()
 {
-    capture->Start(width, height, V4L2_PIX_FMT_H264, fps, bitrate);
+    // should be parameters:
+    // int width, int height, int fps, int bitrate
+    int samplesPerSecond = 30;
+    capture->Start(1280, 720, V4L2_PIX_FMT_H264, samplesPerSecond, 1250000);
+    sampleDuration_us = 1000 * 1000 / samplesPerSecond;
+    sampleTime_us = 0;
+    loadNextSample();
 }
 
 void H264Camera::stop()
 {
-
+    capture->Stop();
 }
 
 void H264Camera::loadNextSample()
 {
+    sample = {};
+    if (!capture->ReadFrame()) return;
+    auto *b = reinterpret_cast<const std::byte*>((char*)capture->GetLastBuffer());
+    sample.assign(b, b + capture->GetLastSize());
+    sampleTime_us += sampleDuration_us;
 }
 
 vector<std::byte> H264Camera::initialNALUS()
 {
     vector<std::byte> units{};
+    if (capture->GetH264HeaderLen() == 0) return units;
+
+    for (int i=0; i<capture->GetH264HeaderLen(); i++)
+    {
+        units.push_back((std::byte)capture->GetH264Header()[i]);
+    }
+
     return units;
 }
 
 rtc::binary H264Camera::getSample()
 {
-    return rtc::binary();
+    return sample;
 }
 
 uint64_t H264Camera::getSampleTime_us()
 {
-    return 0;
+    return sampleTime_us;
 }
 
 uint64_t H264Camera::getSampleDuration_us()
 {
-    return 0;
+    return sampleDuration_us;
 }

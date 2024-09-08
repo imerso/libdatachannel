@@ -23,7 +23,7 @@ protected:
 public:
     H264Camera(std::string device);
     virtual ~H264Camera();
-    void start(int width, int height, int fps, int bitrate);
+    void start() override;
     void stop() override;
     void loadNextSample() override;
     std::vector<std::byte> initialNALUS();
