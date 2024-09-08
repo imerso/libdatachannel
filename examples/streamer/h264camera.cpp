@@ -21,7 +21,7 @@ void H264Camera::start()
     // should be parameters:
     // int width, int height, int fps, int bitrate
     int samplesPerSecond = 30;
-    capture->Start(1280, 720, V4L2_PIX_FMT_H264, samplesPerSecond, 1250000);
+    capture->Start(1280, 720, V4L2_PIX_FMT_H264, samplesPerSecond, 1500000);
     sampleDuration_us = 1000 * 1000 / samplesPerSecond;
     sampleTime_us = 0;
     loadNextSample();
