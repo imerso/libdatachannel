@@ -289,6 +289,8 @@ shared_ptr<Client> createPeerConnection(const Configuration &config,
     client->video = addVideo(pc, 102, 1, "video-stream", "stream1", [id, wc = make_weak_ptr(client)]() {
         MainThread.dispatch([wc]() {
             if (auto c = wc.lock()) {
+                //c->setState(Client::State::Ready);
+                //startStream();
                 addToStream(c, true);
             }
         });
@@ -541,10 +543,10 @@ void addToStream(shared_ptr<Client> client, bool isAddingVideo) {
         assert(client->video.has_value() && client->audio.has_value());
         auto video = client->video.value();
 
-        if (avStream.has_value()) {
-            cout << "Sending initial nalus" << endl;
-            sendInitialNalus(avStream.value(), video);
-        }
+//        if (avStream.has_value()) {
+//            cout << "Sending initial nalus" << endl;
+//            sendInitialNalus(avStream.value(), video);
+//        }
 
         client->setState(Client::State::Ready);
         cout << "STATE READY" << endl;

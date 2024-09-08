@@ -24,7 +24,7 @@ void H264Camera::start()
     capture->Start(1280, 720, V4L2_PIX_FMT_H264, samplesPerSecond, 1500000);
     sampleDuration_us = 1000 * 1000 / samplesPerSecond;
     sampleTime_us = 0;
-    loadNextSample();
+    //loadNextSample();
 }
 
 void H264Camera::stop()
@@ -35,7 +35,8 @@ void H264Camera::stop()
 void H264Camera::loadNextSample()
 {
     sample = {};
-    if (!capture->ReadFrame()) return;
+    //if (!capture->ReadFrame()) return;
+    while (!capture->ReadFrame()) {};
     auto *b = reinterpret_cast<const std::byte*>((char*)capture->GetLastBuffer());
     sample.assign(b, b + capture->GetLastSize());
     sampleTime_us += sampleDuration_us;

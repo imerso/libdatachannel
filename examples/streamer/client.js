@@ -1,28 +1,42 @@
-const iceConnectionLog = document.getElementById('ice-connection-state'),
-    iceGatheringLog = document.getElementById('ice-gathering-state'),
-    signalingLog = document.getElementById('signaling-state'),
-    dataChannelLog = document.getElementById('data-channel');
-
-const clientId = randomId(10);
-const websocket = new WebSocket('ws://127.0.0.1:8000/' + clientId);
-
-websocket.onopen = () => {
-    document.getElementById('start').disabled = false;
-}
-
-websocket.onmessage = async (evt) => {
-    if (typeof evt.data !== 'string') {
-        return;
-    }
-    const message = JSON.parse(evt.data);
-    if (message.type == "offer") {
-        document.getElementById('offer-sdp').textContent = message.sdp;
-        await handleOffer(message)
-    }
-}
-
+let iceConnectionLog = null;
+let iceGatheringLog = null;
+let signalingLog = null;
+let dataChannelLog = null;
+let clientId = null;
+let websocket = null;
 let pc = null;
 let dc = null;
+
+function run()
+{
+    iceConnectionLog = document.getElementById('ice-connection-state');
+    iceGatheringLog = document.getElementById('ice-gathering-state');
+    signalingLog = document.getElementById('signaling-state');
+    dataChannelLog = document.getElementById('data-channel');
+
+    clientId = randomId(10);
+    websocket = new WebSocket('ws://'+window.location.hostname + ':8000/' + clientId);
+
+    websocket.onopen = () => {
+        document.getElementById('start').disabled = false;
+        start();
+    }
+
+    websocket.onmessage = async (evt) => {
+        if (typeof evt.data !== 'string') {
+            return;
+        }
+        const message = JSON.parse(evt.data);
+        if (message.type == "offer") {
+            document.getElementById('offer-sdp').textContent = message.sdp;
+            await handleOffer(message)
+        }
+    }
+}
+
+addEventListener("load", (event) => {
+    run();
+});
 
 function createPeerConnection() {
     const config = {
